@@ -515,6 +515,7 @@ export default function LivreursPage() {
                 onChange={e => handleChange('nom', e.target.value)}
                 onBlur={() => handleBlur('nom')}
                 placeholder="Ex: Ben Ali"
+                autoComplete="off"
                 style={getInputStyle('nom')}
               />
             </FormField>
@@ -525,6 +526,7 @@ export default function LivreursPage() {
                 onChange={e => handleChange('prenom', e.target.value)}
                 onBlur={() => handleBlur('prenom')}
                 placeholder="Ex: Mohamed"
+                autoComplete="off"
                 style={getInputStyle('prenom')}
               />
             </FormField>
@@ -538,6 +540,7 @@ export default function LivreursPage() {
               onChange={e => handleChange('email', e.target.value)}
               onBlur={() => handleBlur('email')}
               placeholder="nom@delivery.com"
+              autoComplete="off"
               type="email"
               style={getInputStyle('email')}
             />
@@ -552,6 +555,7 @@ export default function LivreursPage() {
                 onChange={e => handleChange('password', e.target.value)}
                 onBlur={() => handleBlur('password')}
                 placeholder="Min. 8 car., 1 majuscule, 1 chiffre, 1 spécial"
+                autoComplete="new-password"
                 type={showPassword ? 'text' : 'password'}
                 style={{ ...getInputStyle('password'), paddingRight: 44 }}
               />
@@ -605,6 +609,7 @@ export default function LivreursPage() {
               onChange={e => handleChange('telephone', e.target.value)}
               onBlur={() => handleBlur('telephone')}
               placeholder="+21655555555"
+              autoComplete="off"
               style={getInputStyle('telephone')}
             />
           </FormField>
