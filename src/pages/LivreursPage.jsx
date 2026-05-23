@@ -1,9 +1,67 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { livreursAPI, vehiculesAPI } from '../services/api';
 import { StatusBadge, Spinner, Modal, Btn, StatCard } from '../components/ui';
 import { formatDate } from '../utils/helpers';
 import toast from 'react-hot-toast';
-import { UserCheck, UserX, BarChart2, Trash2, RefreshCw, Users, UserPlus, Car, Pencil } from 'lucide-react';
+import { UserCheck, UserX, BarChart2, Trash2, RefreshCw, Users, UserPlus, Car, Pencil, Eye, EyeOff, AlertCircle, CheckCircle } from 'lucide-react';
+
+// ─── Validation helpers ────────────────────────────────────────────────────────
+const validators = {
+  nom: v => {
+    if (!v.trim()) return 'Le nom est obligatoire';
+    if (v.trim().length < 2) return 'Le nom doit contenir au moins 2 caractères';
+    if (!/^[a-zA-ZÀ-ÿ\s'-]+$/.test(v)) return 'Le nom ne doit contenir que des lettres';
+    return null;
+  },
+  prenom: v => {
+    if (!v.trim()) return 'Le prénom est obligatoire';
+    if (v.trim().length < 2) return 'Le prénom doit contenir au moins 2 caractères';
+    if (!/^[a-zA-ZÀ-ÿ\s'-]+$/.test(v)) return 'Le prénom ne doit contenir que des lettres';
+    return null;
+  },
+  email: v => {
+    if (!v.trim()) return "L'email est obligatoire";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return "Format d'email invalide (ex: nom@domaine.com)";
+    return null;
+  },
+  password: v => {
+    if (!v) return 'Le mot de passe est obligatoire';
+    if (v.length < 8) return 'Le mot de passe doit contenir au moins 8 caractères';
+    if (!/[A-Z]/.test(v)) return 'Le mot de passe doit contenir au moins une majuscule';
+    if (!/[0-9]/.test(v)) return 'Le mot de passe doit contenir au moins un chiffre';
+    if (!/[!@#$%^&*]/.test(v)) return 'Le mot de passe doit contenir au moins un caractère spécial (!@#$%^&*)';
+    return null;
+  },
+  telephone: v => {
+    if (!v.trim()) return 'Le téléphone est obligatoire';
+    if (!/^\+?[0-9]{8,15}$/.test(v.replace(/\s/g, ''))) return 'Format invalide (ex: +21655555555)';
+    return null;
+  },
+};
+
+// ─── Field component with validation ──────────────────────────────────────────
+function FormField({ label, required, error, touched, children }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <label style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>
+        {label} {required && <span style={{ color: '#EF4444' }}>*</span>}
+      </label>
+      {children}
+      {touched && error && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}>
+          <AlertCircle size={13} color="#EF4444" />
+          <span style={{ fontSize: 12, color: '#EF4444' }}>{error}</span>
+        </div>
+      )}
+      {touched && !error && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}>
+          <CheckCircle size={13} color="#10B981" />
+          <span style={{ fontSize: 12, color: '#10B981' }}>Valide</span>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function LivreursPage() {
   const [livreurs, setLivreurs]               = useState([]);
@@ -18,9 +76,21 @@ export default function LivreursPage() {
   // Nouveau livreur
   const [addModal, setAddModal]               = useState(false);
   const [addLoading, setAddLoading]           = useState(false);
+  const [showPassword, setShowPassword]       = useState(false);
   const [form, setForm]                       = useState({
     nom: '', prenom: '', email: '', password: '', telephone: ''
   });
+  const [errors, setErrors]                   = useState({});
+  const [touched, setTouched]                 = useState({});
+
+  // Refs for auto-focus on error
+  const fieldRefs = {
+    nom: useRef(null),
+    prenom: useRef(null),
+    email: useRef(null),
+    password: useRef(null),
+    telephone: useRef(null),
+  };
 
   // Vehicule modal
   const [vehiculeModal, setVehiculeModal]         = useState(null);
@@ -54,6 +124,54 @@ export default function LivreursPage() {
     return vehicules.find(v => v.livreurId === livreurId) || null;
   };
 
+  // ─── Validate single field ──────────────────────────────────────────────────
+  const validateField = (name, value) => {
+    const validator = validators[name];
+    return validator ? validator(value) : null;
+  };
+
+  // ─── Handle field change with live validation ───────────────────────────────
+  const handleChange = (field, value) => {
+    setForm(p => ({ ...p, [field]: value }));
+    if (touched[field]) {
+      setErrors(p => ({ ...p, [field]: validateField(field, value) }));
+    }
+  };
+
+  // ─── Mark field as touched on blur ─────────────────────────────────────────
+  const handleBlur = (field) => {
+    setTouched(p => ({ ...p, [field]: true }));
+    setErrors(p => ({ ...p, [field]: validateField(field, form[field]) }));
+  };
+
+  // ─── Reset form ────────────────────────────────────────────────────────────
+  const resetForm = () => {
+    setForm({ nom: '', prenom: '', email: '', password: '', telephone: '' });
+    setErrors({});
+    setTouched({});
+    setShowPassword(false);
+  };
+
+  // ─── Get password strength ─────────────────────────────────────────────────
+  const getPasswordStrength = (pwd) => {
+    if (!pwd) return { score: 0, label: '', color: '' };
+    let score = 0;
+    if (pwd.length >= 8) score++;
+    if (/[A-Z]/.test(pwd)) score++;
+    if (/[0-9]/.test(pwd)) score++;
+    if (/[!@#$%^&*]/.test(pwd)) score++;
+    const map = [
+      { score: 0, label: '', color: '' },
+      { score: 1, label: 'Très faible', color: '#EF4444' },
+      { score: 2, label: 'Faible', color: '#F97316' },
+      { score: 3, label: 'Moyen', color: '#EAB308' },
+      { score: 4, label: 'Fort', color: '#10B981' },
+    ];
+    return map[score];
+  };
+
+  const pwdStrength = getPasswordStrength(form.password);
+
   const handleToggle = async (id) => {
     try {
       const res = await livreursAPI.toggleActif(id);
@@ -83,62 +201,80 @@ export default function LivreursPage() {
     finally { setStatsLoading(false); }
   };
 
+  // ─── Submit with full validation ───────────────────────────────────────────
   const handleAddLivreur = async () => {
-    if (!form.nom || !form.prenom || !form.email || !form.password) {
-      toast.error('Veuillez remplir tous les champs obligatoires');
+    // Validate all fields
+    const fields = ['nom', 'prenom', 'email', 'password', 'telephone'];
+    const newErrors = {};
+    const newTouched = {};
+
+    fields.forEach(f => {
+      newTouched[f] = true;
+      const err = validateField(f, form[f]);
+      if (err) newErrors[f] = err;
+    });
+
+    setTouched(newTouched);
+    setErrors(newErrors);
+
+    // Focus first error field
+    const firstError = fields.find(f => newErrors[f]);
+    if (firstError) {
+      fieldRefs[firstError]?.current?.focus();
+      toast.error(newErrors[firstError]);
       return;
     }
+
     setAddLoading(true);
     try {
       const res = await livreursAPI.create(form);
       if (res.data.success) {
         toast.success('Livreur créé avec succès !');
         setAddModal(false);
-        setForm({ nom: '', prenom: '', email: '', password: '', telephone: '' });
+        resetForm();
         await load();
       } else {
         toast.error(res.data.message || 'Erreur lors de la création');
       }
     } catch (e) {
-      toast.error(e.response?.data?.message || 'Erreur lors de la création');
+      const msg = e.response?.data?.message || 'Erreur lors de la création';
+      if (msg.toLowerCase().includes('telephone') || msg.toLowerCase().includes('duplicate')) {
+        setErrors(p => ({ ...p, telephone: 'Ce numéro de téléphone est déjà utilisé' }));
+        setTouched(p => ({ ...p, telephone: true }));
+        fieldRefs.telephone?.current?.focus();
+      } else if (msg.toLowerCase().includes('email')) {
+        setErrors(p => ({ ...p, email: 'Cet email est déjà utilisé' }));
+        setTouched(p => ({ ...p, email: true }));
+        fieldRefs.email?.current?.focus();
+      }
+      toast.error(msg);
     } finally {
       setAddLoading(false);
     }
   };
 
-  // ✅ Ouvrir modal pour ASSIGNER un nouveau vehicule
   const openAssignerVehicule = (livreur) => {
     setVehiculeModal(livreur);
-    setVehiculeForm({
-      marque: '', modele: '', immatriculation: '', type: 'VOITURE', vehiculeId: null
-    });
+    setVehiculeForm({ marque: '', modele: '', immatriculation: '', type: 'VOITURE', vehiculeId: null });
   };
 
-  // ✅ Ouvrir modal pour MODIFIER un vehicule existant
   const openEditVehicule = (livreur, vehicule) => {
     setVehiculeModal(livreur);
     setVehiculeForm({
-      marque: vehicule.marque,
-      modele: vehicule.modele,
-      immatriculation: vehicule.immatriculation,
-      type: vehicule.type,
-      vehiculeId: vehicule.id
+      marque: vehicule.marque, modele: vehicule.modele,
+      immatriculation: vehicule.immatriculation, type: vehicule.type, vehiculeId: vehicule.id
     });
   };
 
-  // ✅ Supprimer un vehicule
   const handleDeleteVehicule = async (vehiculeId) => {
     if (!window.confirm('Supprimer ce véhicule ?')) return;
     try {
       await vehiculesAPI.delete(vehiculeId);
       toast.success('Véhicule supprimé');
       await loadVehicules();
-    } catch (e) {
-      toast.error(e.response?.data?.message || 'Erreur');
-    }
+    } catch (e) { toast.error(e.response?.data?.message || 'Erreur'); }
   };
 
-  // ✅ Sauvegarder vehicule (creation ou modification)
   const handleSaveVehicule = async () => {
     if (!vehiculeForm.marque || !vehiculeForm.modele || !vehiculeForm.immatriculation) {
       toast.error('Veuillez remplir tous les champs');
@@ -148,22 +284,16 @@ export default function LivreursPage() {
     try {
       let res;
       if (vehiculeForm.vehiculeId) {
-        // ✅ MODIFICATION
         res = await vehiculesAPI.update(vehiculeForm.vehiculeId, {
-          marque: vehiculeForm.marque,
-          modele: vehiculeForm.modele,
-          immatriculation: vehiculeForm.immatriculation,
-          type: vehiculeForm.type,
+          marque: vehiculeForm.marque, modele: vehiculeForm.modele,
+          immatriculation: vehiculeForm.immatriculation, type: vehiculeForm.type,
           livreurId: vehiculeModal.id
         });
         if (res.data.success) toast.success('Véhicule modifié avec succès !');
       } else {
-        // ✅ CREATION
         res = await vehiculesAPI.create({
-          marque: vehiculeForm.marque,
-          modele: vehiculeForm.modele,
-          immatriculation: vehiculeForm.immatriculation,
-          type: vehiculeForm.type,
+          marque: vehiculeForm.marque, modele: vehiculeForm.modele,
+          immatriculation: vehiculeForm.immatriculation, type: vehiculeForm.type,
           livreurId: vehiculeModal.id
         });
         if (res.data.success) toast.success('Véhicule assigné avec succès !');
@@ -172,7 +302,7 @@ export default function LivreursPage() {
       setVehiculeForm({ marque: '', modele: '', immatriculation: '', type: 'VOITURE', vehiculeId: null });
       await loadVehicules();
     } catch (e) {
-      toast.error(e.response?.data?.message || 'Erreur lors de l\'enregistrement');
+      toast.error(e.response?.data?.message || "Erreur lors de l'enregistrement");
     } finally {
       setVehiculeLoading(false);
     }
@@ -185,16 +315,16 @@ export default function LivreursPage() {
     l.telephone?.includes(search)
   );
 
-  const inputStyle = {
+  // ─── Styles ────────────────────────────────────────────────────────────────
+  const getInputStyle = (field) => ({
     width: '100%', padding: '10px 14px', borderRadius: 10,
-    border: '1.5px solid #E2E8F0', fontSize: 14, outline: 'none',
-    boxSizing: 'border-box', marginTop: 4,
-  };
+    border: `1.5px solid ${touched[field] && errors[field] ? '#FCA5A5' : touched[field] && !errors[field] ? '#6EE7B7' : '#E2E8F0'}`,
+    fontSize: 14, outline: 'none', boxSizing: 'border-box',
+    background: touched[field] && errors[field] ? '#FFF5F5' : touched[field] && !errors[field] ? '#F0FDF4' : 'white',
+    transition: 'border-color 0.2s, background 0.2s',
+  });
 
-  const labelStyle = {
-    fontSize: 13, fontWeight: 600, color: '#374151',
-    display: 'block', marginBottom: 12
-  };
+  const labelStyle = { fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -212,7 +342,7 @@ export default function LivreursPage() {
           style={{ padding: 10, borderRadius: 10, border: '1.5px solid #E2E8F0', background: 'white', cursor: 'pointer' }}>
           <RefreshCw size={16} color="#64748B" />
         </button>
-        <button onClick={() => setAddModal(true)} style={{
+        <button onClick={() => { resetForm(); setAddModal(true); }} style={{
           display: 'flex', alignItems: 'center', gap: 8,
           padding: '10px 18px', borderRadius: 10, border: 'none',
           background: '#1565C0', color: 'white', fontSize: 14,
@@ -263,8 +393,6 @@ export default function LivreursPage() {
                   <tr key={l.id} style={{ borderBottom: '1px solid #F8FAFC' }}
                     onMouseEnter={e => e.currentTarget.style.background = '#FAFBFF'}
                     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-
-                    {/* Livreur */}
                     <td style={{ padding: '14px 16px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                         <div style={{
@@ -283,99 +411,45 @@ export default function LivreursPage() {
                         </div>
                       </div>
                     </td>
-
-                    {/* Email */}
                     <td style={{ padding: '14px 16px', color: '#64748B' }}>{l.email}</td>
-
-                    {/* Telephone */}
                     <td style={{ padding: '14px 16px', color: '#64748B' }}>{l.telephone}</td>
-
-                    {/* ✅ COLONNE VEHICULE AVEC MODIFIER ET SUPPRIMER */}
                     <td style={{ padding: '14px 16px' }}>
                       {vehicule ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                          {/* Info vehicule */}
-                          <div style={{ fontWeight: 600, fontSize: 13 }}>
-                            🚗 {vehicule.marque} {vehicule.modele}
-                          </div>
-                          {/* Badge immatriculation */}
-                          <span style={{
-                            fontSize: 11, color: '#6366F1', fontWeight: 600,
-                            background: '#EEF2FF', display: 'inline-block',
-                            padding: '2px 8px', borderRadius: 10, width: 'fit-content'
-                          }}>
+                          <div style={{ fontWeight: 600, fontSize: 13 }}>🚗 {vehicule.marque} {vehicule.modele}</div>
+                          <span style={{ fontSize: 11, color: '#6366F1', fontWeight: 600, background: '#EEF2FF', display: 'inline-block', padding: '2px 8px', borderRadius: 10, width: 'fit-content' }}>
                             {vehicule.immatriculation}
                           </span>
-                          {/* Boutons modifier et supprimer */}
                           <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
-                            <button
-                              onClick={() => openEditVehicule(l, vehicule)}
-                              title="Modifier le véhicule"
-                              style={{
-                                display: 'flex', alignItems: 'center', gap: 4,
-                                padding: '3px 10px', borderRadius: 8,
-                                border: '1.5px solid #BFDBFE',
-                                background: '#EFF6FF', cursor: 'pointer',
-                                fontSize: 11, color: '#3B82F6', fontWeight: 600
-                              }}>
+                            <button onClick={() => openEditVehicule(l, vehicule)} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: 8, border: '1.5px solid #BFDBFE', background: '#EFF6FF', cursor: 'pointer', fontSize: 11, color: '#3B82F6', fontWeight: 600 }}>
                               <Pencil size={11} /> Modifier
                             </button>
-                            <button
-                              onClick={() => handleDeleteVehicule(vehicule.id)}
-                              title="Supprimer le véhicule"
-                              style={{
-                                display: 'flex', alignItems: 'center', gap: 4,
-                                padding: '3px 10px', borderRadius: 8,
-                                border: '1.5px solid #FEE2E2',
-                                background: '#FFF5F5', cursor: 'pointer',
-                                fontSize: 11, color: '#EF4444', fontWeight: 600
-                              }}>
+                            <button onClick={() => handleDeleteVehicule(vehicule.id)} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: 8, border: '1.5px solid #FEE2E2', background: '#FFF5F5', cursor: 'pointer', fontSize: 11, color: '#EF4444', fontWeight: 600 }}>
                               <Trash2 size={11} /> Supprimer
                             </button>
                           </div>
                         </div>
                       ) : (
-                        <button onClick={() => openAssignerVehicule(l)} style={{
-                          display: 'flex', alignItems: 'center', gap: 6,
-                          padding: '5px 10px', borderRadius: 8,
-                          border: '1.5px dashed #CBD5E1',
-                          background: 'transparent', cursor: 'pointer',
-                          fontSize: 12, color: '#94A3B8',
-                        }}>
+                        <button onClick={() => openAssignerVehicule(l)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 8, border: '1.5px dashed #CBD5E1', background: 'transparent', cursor: 'pointer', fontSize: 12, color: '#94A3B8' }}>
                           <Car size={13} /> Assigner
                         </button>
                       )}
                     </td>
-
-                    {/* Statut */}
                     <td style={{ padding: '14px 16px' }}>
-                      <span style={{
-                        padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600,
-                        background: l.actif ? '#D1FAE5' : '#FEE2E2',
-                        color: l.actif ? '#065F46' : '#991B1B',
-                      }}>
-                        {l.actif ? '● Actif' : '○ Inactif'}
+                      <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600, background: l.actif ? '#D1FAE5' : '#FEE2E2', color: l.actif ? '#065F46' : '#991B1B' }}>
+                        {l.actif ? '✅ Actif' : '🔴 Inactif'}
                       </span>
                     </td>
-
-                    {/* Date inscription */}
-                    <td style={{ padding: '14px 16px', color: '#94A3B8', fontSize: 12 }}>
-                      {formatDate(l.createdAt)}
-                    </td>
-
-                    {/* Actions */}
+                    <td style={{ padding: '14px 16px', color: '#94A3B8', fontSize: 12 }}>{formatDate(l.createdAt)}</td>
                     <td style={{ padding: '14px 16px' }}>
                       <div style={{ display: 'flex', gap: 6 }}>
-                        <button onClick={() => openStats(l)} title="Statistiques"
-                          style={{ padding: '6px 8px', borderRadius: 8, border: '1.5px solid #E0E7FF', background: '#EEF2FF', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                        <button onClick={() => openStats(l)} title="Statistiques" style={{ padding: '6px 8px', borderRadius: 8, border: '1.5px solid #E0E7FF', background: '#EEF2FF', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
                           <BarChart2 size={15} color="#6366F1" />
                         </button>
-                        <button onClick={() => handleToggle(l.id)} title={l.actif ? 'Désactiver' : 'Activer'}
-                          style={{ padding: '6px 8px', borderRadius: 8, border: `1.5px solid ${l.actif ? '#FEE2E2' : '#D1FAE5'}`, background: l.actif ? '#FFF5F5' : '#F0FDF4', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                        <button onClick={() => handleToggle(l.id)} title={l.actif ? 'Désactiver' : 'Activer'} style={{ padding: '6px 8px', borderRadius: 8, border: `1.5px solid ${l.actif ? '#FEE2E2' : '#D1FAE5'}`, background: l.actif ? '#FFF5F5' : '#F0FDF4', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
                           {l.actif ? <UserX size={15} color="#EF4444" /> : <UserCheck size={15} color="#10B981" />}
                         </button>
-                        <button onClick={() => handleDelete(l.id)} title="Supprimer"
-                          style={{ padding: '6px 8px', borderRadius: 8, border: '1.5px solid #FEE2E2', background: '#FFF5F5', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                        <button onClick={() => handleDelete(l.id)} title="Supprimer" style={{ padding: '6px 8px', borderRadius: 8, border: '1.5px solid #FEE2E2', background: '#FFF5F5', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
                           <Trash2 size={15} color="#EF4444" />
                         </button>
                       </div>
@@ -388,41 +462,27 @@ export default function LivreursPage() {
         )}
       </div>
 
-      {/* ✅ MODAL VEHICULE (CREATION + MODIFICATION) */}
-      <Modal
-        open={!!vehiculeModal}
-        onClose={() => {
-          setVehiculeModal(null);
-          setVehiculeForm({ marque: '', modele: '', immatriculation: '', type: 'VOITURE', vehiculeId: null });
-        }}
-        title={`${vehiculeForm.vehiculeId ? '✏️ Modifier' : '🚗 Assigner'} un véhicule — ${vehiculeModal?.nom} ${vehiculeModal?.prenom}`}
-        width={460}>
+      {/* Modal Véhicule */}
+      <Modal open={!!vehiculeModal} onClose={() => { setVehiculeModal(null); setVehiculeForm({ marque: '', modele: '', immatriculation: '', type: 'VOITURE', vehiculeId: null }); }}
+        title={`${vehiculeForm.vehiculeId ? '✏️ Modifier' : '🚗 Assigner'} un véhicule — ${vehiculeModal?.nom} ${vehiculeModal?.prenom}`} width={460}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div>
               <label style={labelStyle}>Marque *</label>
-              <input value={vehiculeForm.marque}
-                onChange={e => setVehiculeForm(p => ({ ...p, marque: e.target.value }))}
-                placeholder="Ex: Renault" style={inputStyle} />
+              <input value={vehiculeForm.marque} onChange={e => setVehiculeForm(p => ({ ...p, marque: e.target.value }))} placeholder="Ex: Renault" style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1.5px solid #E2E8F0', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
             </div>
             <div>
               <label style={labelStyle}>Modèle *</label>
-              <input value={vehiculeForm.modele}
-                onChange={e => setVehiculeForm(p => ({ ...p, modele: e.target.value }))}
-                placeholder="Ex: Kangoo" style={inputStyle} />
+              <input value={vehiculeForm.modele} onChange={e => setVehiculeForm(p => ({ ...p, modele: e.target.value }))} placeholder="Ex: Kangoo" style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1.5px solid #E2E8F0', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
             </div>
           </div>
           <div>
             <label style={labelStyle}>Immatriculation *</label>
-            <input value={vehiculeForm.immatriculation}
-              onChange={e => setVehiculeForm(p => ({ ...p, immatriculation: e.target.value }))}
-              placeholder="Ex: 123 TUN 4567" style={inputStyle} />
+            <input value={vehiculeForm.immatriculation} onChange={e => setVehiculeForm(p => ({ ...p, immatriculation: e.target.value }))} placeholder="Ex: 123 TUN 4567" style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1.5px solid #E2E8F0', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
           </div>
           <div>
             <label style={labelStyle}>Type de véhicule</label>
-            <select value={vehiculeForm.type}
-              onChange={e => setVehiculeForm(p => ({ ...p, type: e.target.value }))}
-              style={{ ...inputStyle, marginTop: 0 }}>
+            <select value={vehiculeForm.type} onChange={e => setVehiculeForm(p => ({ ...p, type: e.target.value }))} style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1.5px solid #E2E8F0', fontSize: 14, outline: 'none', boxSizing: 'border-box' }}>
               <option value="VOITURE">🚗 Voiture</option>
               <option value="MOTO">🏍️ Moto</option>
               <option value="CAMION">🚛 Camion</option>
@@ -430,68 +490,147 @@ export default function LivreursPage() {
             </select>
           </div>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 8 }}>
-            <button
-              onClick={() => {
-                setVehiculeModal(null);
-                setVehiculeForm({ marque: '', modele: '', immatriculation: '', type: 'VOITURE', vehiculeId: null });
-              }}
-              style={{ padding: '10px 20px', borderRadius: 10, border: '1.5px solid #E2E8F0', background: 'white', cursor: 'pointer', fontSize: 14 }}>
+            <button onClick={() => { setVehiculeModal(null); setVehiculeForm({ marque: '', modele: '', immatriculation: '', type: 'VOITURE', vehiculeId: null }); }} style={{ padding: '10px 20px', borderRadius: 10, border: '1.5px solid #E2E8F0', background: 'white', cursor: 'pointer', fontSize: 14 }}>
               Annuler
             </button>
-            <button onClick={handleSaveVehicule} disabled={vehiculeLoading}
-              style={{
-                padding: '10px 20px', borderRadius: 10, border: 'none',
-                background: vehiculeForm.vehiculeId ? '#059669' : '#1565C0',
-                color: 'white', fontWeight: 600, cursor: 'pointer',
-                fontSize: 14, opacity: vehiculeLoading ? 0.7 : 1
-              }}>
-              {vehiculeLoading ? 'Enregistrement...' :
-                vehiculeForm.vehiculeId ? '✏️ Modifier le véhicule' : '🚗 Assigner le véhicule'}
+            <button onClick={handleSaveVehicule} disabled={vehiculeLoading} style={{ padding: '10px 20px', borderRadius: 10, border: 'none', background: vehiculeForm.vehiculeId ? '#059669' : '#1565C0', color: 'white', fontWeight: 600, cursor: 'pointer', fontSize: 14, opacity: vehiculeLoading ? 0.7 : 1 }}>
+              {vehiculeLoading ? 'Enregistrement...' : vehiculeForm.vehiculeId ? '✏️ Modifier le véhicule' : '🚗 Assigner le véhicule'}
             </button>
           </div>
         </div>
       </Modal>
 
-      {/* Modal Nouveau Livreur */}
+      {/* ─── Modal Nouveau Livreur AMÉLIORÉ ─── */}
       <Modal open={addModal}
-        onClose={() => { setAddModal(false); setForm({ nom: '', prenom: '', email: '', password: '', telephone: '' }); }}
-        title="Nouveau livreur" width={480}>
+        onClose={() => { setAddModal(false); resetForm(); }}
+        title="👤 Nouveau livreur" width={500}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+          {/* Nom & Prénom */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label style={labelStyle}>Nom *</label>
-              <input value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))}
-                placeholder="Nom" style={inputStyle} />
+            <FormField label="Nom" required error={errors.nom} touched={touched.nom}>
+              <input
+                ref={fieldRefs.nom}
+                value={form.nom}
+                onChange={e => handleChange('nom', e.target.value)}
+                onBlur={() => handleBlur('nom')}
+                placeholder="Ex: Ben Ali"
+                style={getInputStyle('nom')}
+              />
+            </FormField>
+            <FormField label="Prénom" required error={errors.prenom} touched={touched.prenom}>
+              <input
+                ref={fieldRefs.prenom}
+                value={form.prenom}
+                onChange={e => handleChange('prenom', e.target.value)}
+                onBlur={() => handleBlur('prenom')}
+                placeholder="Ex: Mohamed"
+                style={getInputStyle('prenom')}
+              />
+            </FormField>
+          </div>
+
+          {/* Email */}
+          <FormField label="Email" required error={errors.email} touched={touched.email}>
+            <input
+              ref={fieldRefs.email}
+              value={form.email}
+              onChange={e => handleChange('email', e.target.value)}
+              onBlur={() => handleBlur('email')}
+              placeholder="nom@delivery.com"
+              type="email"
+              style={getInputStyle('email')}
+            />
+          </FormField>
+
+          {/* Mot de passe avec eye */}
+          <FormField label="Mot de passe" required error={errors.password} touched={touched.password}>
+            <div style={{ position: 'relative' }}>
+              <input
+                ref={fieldRefs.password}
+                value={form.password}
+                onChange={e => handleChange('password', e.target.value)}
+                onBlur={() => handleBlur('password')}
+                placeholder="Min. 8 car., 1 majuscule, 1 chiffre, 1 spécial"
+                type={showPassword ? 'text' : 'password'}
+                style={{ ...getInputStyle('password'), paddingRight: 44 }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(p => !p)}
+                style={{
+                  position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
+                  background: 'none', border: 'none', cursor: 'pointer', padding: 4,
+                  display: 'flex', alignItems: 'center', color: '#94A3B8',
+                }}
+                title={showPassword ? 'Masquer' : 'Afficher'}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
             </div>
-            <div>
-              <label style={labelStyle}>Prénom *</label>
-              <input value={form.prenom} onChange={e => setForm(p => ({ ...p, prenom: e.target.value }))}
-                placeholder="Prénom" style={inputStyle} />
-            </div>
-          </div>
-          <div>
-            <label style={labelStyle}>Email *</label>
-            <input value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))}
-              placeholder="email@delivery.com" type="email" style={inputStyle} />
-          </div>
-          <div>
-            <label style={labelStyle}>Mot de passe *</label>
-            <input value={form.password} onChange={e => setForm(p => ({ ...p, password: e.target.value }))}
-              placeholder="Mot de passe" type="password" style={inputStyle} />
-          </div>
-          <div>
-            <label style={labelStyle}>Téléphone</label>
-            <input value={form.telephone} onChange={e => setForm(p => ({ ...p, telephone: e.target.value }))}
-              placeholder="+21655555555" style={inputStyle} />
-          </div>
+
+            {/* Password strength bar */}
+            {form.password && (
+              <div style={{ marginTop: 6 }}>
+                <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+                  {[1, 2, 3, 4].map(i => (
+                    <div key={i} style={{
+                      flex: 1, height: 4, borderRadius: 4,
+                      background: i <= pwdStrength.score ? pwdStrength.color : '#E2E8F0',
+                      transition: 'background 0.3s',
+                    }} />
+                  ))}
+                </div>
+                {pwdStrength.label && (
+                  <span style={{ fontSize: 11, color: pwdStrength.color, fontWeight: 600 }}>
+                    Force : {pwdStrength.label}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Password rules hint */}
+            {!touched.password && (
+              <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 4 }}>
+                Doit contenir : 8+ caractères • 1 majuscule • 1 chiffre • 1 spécial (!@#$%^&*)
+              </div>
+            )}
+          </FormField>
+
+          {/* Téléphone */}
+          <FormField label="Téléphone" required error={errors.telephone} touched={touched.telephone}>
+            <input
+              ref={fieldRefs.telephone}
+              value={form.telephone}
+              onChange={e => handleChange('telephone', e.target.value)}
+              onBlur={() => handleBlur('telephone')}
+              placeholder="+21655555555"
+              style={getInputStyle('telephone')}
+            />
+          </FormField>
+
+          {/* Boutons */}
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 8 }}>
-            <button onClick={() => setAddModal(false)}
+            <button onClick={() => { setAddModal(false); resetForm(); }}
               style={{ padding: '10px 20px', borderRadius: 10, border: '1.5px solid #E2E8F0', background: 'white', cursor: 'pointer', fontSize: 14 }}>
               Annuler
             </button>
             <button onClick={handleAddLivreur} disabled={addLoading}
-              style={{ padding: '10px 20px', borderRadius: 10, border: 'none', background: '#1565C0', color: 'white', fontWeight: 600, cursor: 'pointer', fontSize: 14, opacity: addLoading ? 0.7 : 1 }}>
-              {addLoading ? 'Création...' : 'Créer le livreur'}
+              style={{
+                padding: '10px 24px', borderRadius: 10, border: 'none',
+                background: addLoading ? '#93C5FD' : '#1565C0',
+                color: 'white', fontWeight: 600, cursor: addLoading ? 'not-allowed' : 'pointer',
+                fontSize: 14, display: 'flex', alignItems: 'center', gap: 8,
+                transition: 'background 0.2s',
+              }}>
+              {addLoading ? (
+                <>
+                  <div style={{ width: 14, height: 14, border: '2px solid white', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                  Création...
+                </>
+              ) : (
+                <><UserPlus size={16} /> Créer le livreur</>
+              )}
             </button>
           </div>
         </div>
@@ -500,7 +639,7 @@ export default function LivreursPage() {
       {/* Stats Modal */}
       <Modal open={!!statsModal}
         onClose={() => { setStatsModal(null); setStatsData(null); }}
-        title={`Statistiques – ${statsModal?.nom} ${statsModal?.prenom}`} width={500}>
+        title={`Statistiques — ${statsModal?.nom} ${statsModal?.prenom}`} width={500}>
         {statsLoading ? (
           <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}><Spinner /></div>
         ) : statsData ? (
@@ -508,15 +647,16 @@ export default function LivreursPage() {
             <StatCard label="Total colis"    value={statsData.totalColis}    icon="📦" color="#3B82F6" />
             <StatCard label="Livrés"         value={statsData.colisLivres}   icon="✅" color="#10B981" />
             <StatCard label="En cours"       value={statsData.colisEnCours}  icon="🚚" color="#8B5CF6" />
-            <StatCard label="Échecs"         value={statsData.colisEchoues}  icon="❌" color="#EF4444" />
+            <StatCard label="Échecs"         value={statsData.colisEchoues}  icon="⛔" color="#EF4444" />
             <div style={{ gridColumn: '1/-1' }}>
-              <StatCard label="Taux de réussite" value={`${statsData.tauxReussite}%`} icon="🎯" color="#10B981"
+              <StatCard label="Taux de réussite" value={`${statsData.tauxReussite}%`} icon="🏆" color="#10B981"
                 sub={`${statsData.livraisonsAujourdHui} livraisons aujourd'hui`} />
             </div>
           </div>
         ) : null}
       </Modal>
 
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
